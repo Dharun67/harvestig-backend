@@ -9,8 +9,8 @@ import { getWeatherForecast } from '../services/weatherService.js';
 
 const router = Router();
 
-// GET /api/analytics/overview
-router.get('/overview', async (req, res, next) => {
+// GET /api/analytics, /api/analytics/overview, /api/analytics/dashboard
+router.get(['/', '/overview', '/dashboard'], async (req, res, next) => {
   try {
     const userId = req.user?.id;
     const filter = userId ? { user_id: userId } : {};

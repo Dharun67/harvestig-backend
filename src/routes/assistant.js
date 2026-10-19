@@ -7,12 +7,13 @@ import { Warehouse } from '../models/Warehouse.js';
 
 const router = Router();
 
-// POST /api/ai/chat
-router.post('/chat', async (req, res, next) => {
+// POST /api/ai/chat or /api/ai/ask
+router.post(['/chat', '/ask'], async (req, res, next) => {
   try {
-    const { prompt, harvest_id, crop_type, location } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ success: false, message: 'prompt is required.' });
+    const { prompt, query, message, harvest_id, crop_type, location } = req.body;
+    const promptText = prompt || query || message;
+    if (!promptText) {
+      return res.status(400).json({ success: false, message: 'prompt or query is required.' });
     }
 
     // Build structured real-world context for Gemini
@@ -81,7 +82,7 @@ router.post('/chat', async (req, res, next) => {
       };
     }
 
-    const aiResult = await askAgriculturalAssistant(prompt, context);
+    const aiResult = await askAgriculturalAssistant(promptText, context);
 
     res.json({
       success: true,

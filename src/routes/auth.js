@@ -25,13 +25,17 @@ router.post('/register', async (req, res, next) => {
     const newId = `USR${String(userCount + 1).padStart(6, '0')}`;
     const password_hash = await bcrypt.hash(password, 10);
 
+    const validRoles = ['farmer', 'industry_buyer', 'transport_provider', 'warehouse_operator', 'exporter', 'admin'];
+    const normalizedRole = role ? String(role).toLowerCase().trim().replace(/[\s-]+/g, '_') : 'farmer';
+    const assignedRole = validRoles.includes(normalizedRole) ? normalizedRole : 'farmer';
+
     const newUser = await User.create({
       _id: newId,
       user_id: newId,
       full_name: full_name.trim(),
       email: email.toLowerCase().trim(),
       password_hash,
-      role: role || 'farmer',
+      role: assignedRole,
       state: state || 'Haryana',
       district: district || 'Karnal',
       phone: phone || '',

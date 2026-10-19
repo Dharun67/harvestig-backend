@@ -6,8 +6,8 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
 
-// List biomass listings
-router.get('/', async (req, res, next) => {
+// List biomass listings (GET /api/biomass or /api/biomass/listings)
+router.get(['/', '/listings'], async (req, res, next) => {
   try {
     const { residue_type, state, district, limit = 50 } = req.query;
     const filter = {};
