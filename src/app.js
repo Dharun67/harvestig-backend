@@ -50,9 +50,21 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan('dev'));
 
-  // Health checks
+  // Root endpoint & Health checks
+  app.get('/', (req, res) => {
+    res.json({
+      success: true,
+      message: 'AgriConnect AI Backend API is live and operational!',
+      status: 'UP',
+      database: 'Connected to MongoDB Atlas',
+      version: '1.0.0',
+      timestamp: new Date().toISOString()
+    });
+  });
+
   app.get('/health', (req, res) => {
     res.json({
+      success: true,
       status: 'UP',
       service: 'AgriConnect AI Node.js Express Backend',
       timestamp: new Date().toISOString(),
