@@ -48,10 +48,11 @@ Please provide a clear, structured, and helpful response. Use markdown formattin
 `;
 
   const ai = getGenAI();
-  if (ai) {
+  if (ai && env.geminiApiKey && !env.geminiApiKey.includes('placeholder') && !env.geminiApiKey.includes('your_')) {
     try {
       const model = ai.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(fullPrompt);
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout (10s)')), 10000));
+      const result = await Promise.race([model.generateContent(fullPrompt), timeoutPromise]);
       const response = await result.response;
       return {
         answer: response.text(),
