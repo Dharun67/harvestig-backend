@@ -72,6 +72,29 @@ export function createApp() {
     });
   });
 
+  app.get('/api', (req, res) => {
+    res.json({
+      success: true,
+      message: 'AgriConnect AI REST API Gateway is operational!',
+      version: '1.0.0',
+      database: 'Connected to MongoDB Atlas',
+      endpoints: {
+        health: '/api/health',
+        auth: '/api/auth',
+        markets: '/api/markets/overview',
+        harvests: '/api/harvests',
+        warehouses: '/api/warehouses',
+        logistics: '/api/logistics',
+        biomass: '/api/biomass',
+        buyers: '/api/buyers',
+        bookings: '/api/bookings',
+        decisions: '/api/decisions',
+        analytics: '/api/analytics',
+        ai: '/api/ai'
+      }
+    });
+  });
+
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'UP',
