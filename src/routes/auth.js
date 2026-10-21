@@ -21,8 +21,7 @@ router.post('/register', async (req, res, next) => {
     }
 
     // Generate unique ID
-    const userCount = await User.countDocuments();
-    const newId = `USR${String(userCount + 1).padStart(6, '0')}`;
+    const newId = `USR${Date.now().toString().slice(-6)}${Math.floor(100 + Math.random() * 900)}`;
     const password_hash = await bcrypt.hash(password, 10);
 
     const validRoles = ['farmer', 'industry_buyer', 'transport_provider', 'warehouse_operator', 'exporter', 'admin'];

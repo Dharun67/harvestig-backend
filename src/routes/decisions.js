@@ -75,13 +75,35 @@ router.get('/', authenticate, async (req, res, next) => {
 // Dynamic decision evaluation endpoint
 router.post('/evaluate', authenticate, async (req, res, next) => {
   try {
-    const { harvest_id, crop_type, quantity_kg, current_price, holding_days, state, district } = req.body;
+    const {
+      harvest_id,
+      crop_type,
+      quantity_kg,
+      quantity_quintals,
+      quantityTonnes,
+      current_price,
+      current_modal_price_inr,
+      holding_days,
+      storage_duration_days,
+      state,
+      district,
+      has_biomass,
+      biomass_type
+    } = req.body;
 
-    let harvestCrop = crop_type;
-    let qty = quantity_kg ? parseFloat(quantity_kg) : 4000;
-    let currPrice = current_price ? parseFloat(current_price) : 2840;
+    let harvestCrop = crop_type || 'Basmati Rice';
+    let qty = 4000;
+    if (quantity_quintals) {
+      qty = parseFloat(quantity_quintals) * 100;
+    } else if (quantity_kg) {
+      qty = parseFloat(quantity_kg);
+    } else if (quantityTonnes) {
+      qty = parseFloat(quantityTonnes) * 1000;
+    }
+
     let userState = state || 'Haryana';
     let userDist = district || 'Karnal';
+    let holdingDays = storage_duration_days ? parseInt(storage_duration_days, 10) : (holding_days ? parseInt(holding_days, 10) : 21);
 
     if (harvest_id) {
       const h = await Harvest.findById(harvest_id) || await Harvest.findOne({ harvest_id });
@@ -93,6 +115,7 @@ router.post('/evaluate', authenticate, async (req, res, next) => {
       }
     }
 
+    let currPrice = current_modal_price_inr ? parseFloat(current_modal_price_inr) : (current_price ? parseFloat(current_price) : 0);
     if (!currPrice || currPrice <= 0) {
       const latestPrice = await MarketPrice.findOne({
         crop_type: new RegExp(harvestCrop || 'Rice', 'i')
@@ -102,17 +125,125 @@ router.post('/evaluate', authenticate, async (req, res, next) => {
 
     const decision = await mlClient.getPostHarvestDecision({
       harvest_id: harvest_id || 'HAR_CUSTOM',
-      crop_type: harvestCrop || 'Basmati Rice',
+      crop_type: harvestCrop,
       quantity_kg: qty,
       current_local_price_inr_per_quintal: currPrice,
-      holding_days_intended: holding_days ? parseInt(holding_days, 10) : 21,
+      holding_days_intended: holdingDays,
       state: userState,
       district: userDist
     });
 
+    const qtl = qty / 100;
+    const immNet = Math.round(qtl * currPrice * 0.985);
+    const storeGross = Math.round(qtl * currPrice * 1.12);
+    const storeCosts = Math.round((qty * 0.08 * holdingDays) + 1500 + 1200);
+    const storeNet = storeGross - storeCosts;
+    const altGross = Math.round(qtl * currPrice * 1.07);
+    const altCosts = Math.round(2400 + (qtl * currPrice * 0.02));
+    const altNet = altGross - altCosts;
+    const procGross = Math.round(qtl * currPrice * 1.05 + (has_biomass ? qtl * 80 : 0));
+    const procCosts = Math.round(1800 + (qtl * currPrice * 0.015));
+    const procNet = procGross - procCosts;
+
+    // Determine top pathway
+    const pathwayNets = [
+      { pathway: 'store_then_sell', net: storeNet },
+      { pathway: 'sell_immediately', net: immNet },
+      { pathway: 'alternate_market', net: altNet },
+      { pathway: 'processing_and_biomass', net: procNet }
+    ];
+    pathwayNets.sort((a, b) => b.net - a.net);
+    const topPathway = pathwayNets[0].pathway;
+
+    const recommendations = [
+      {
+        pathway: 'store_then_sell',
+        label: `Store in Cold Storage (${holdingDays} Days)`,
+        estimated_net_return_inr: storeNet,
+        gross_revenue_inr: storeGross,
+        total_costs_inr: storeCosts,
+        cost_breakdown: {
+          storage_fee: Math.round(qty * 0.08 * holdingDays),
+          freight_transport: 1500,
+          handling_and_grading: 1200
+        },
+        upside_vs_immediate_sale_inr: Math.max(0, storeNet - immNet),
+        confidence_score: 78,
+        recommended: topPathway === 'store_then_sell',
+        reasoning: `Projected seasonal price increase covers storage fees with an estimated net gain of ₹${Math.max(0, storeNet - immNet).toLocaleString()}.`,
+        risks: ['Storage humidity control', 'Minor market volatility']
+      },
+      {
+        pathway: 'sell_immediately',
+        label: 'Sell Immediately at Local Mandi',
+        estimated_net_return_inr: immNet,
+        gross_revenue_inr: Math.round(qtl * currPrice),
+        total_costs_inr: Math.round(qtl * currPrice * 0.015),
+        cost_breakdown: {
+          storage_fee: 0,
+          freight_transport: 400,
+          handling_and_grading: Math.round(qtl * currPrice * 0.015)
+        },
+        upside_vs_immediate_sale_inr: 0,
+        confidence_score: 95,
+        recommended: topPathway === 'sell_immediately',
+        reasoning: 'Zero storage risk with instant cash realization at prevailing APMC mandi modal price.',
+        risks: ['Foregoes upcoming seasonal price spikes']
+      },
+      {
+        pathway: 'alternate_market',
+        label: 'Inter-District Direct Trade',
+        estimated_net_return_inr: altNet,
+        gross_revenue_inr: altGross,
+        total_costs_inr: altCosts,
+        cost_breakdown: {
+          storage_fee: 0,
+          freight_transport: 2400,
+          handling_and_grading: Math.round(qtl * currPrice * 0.02)
+        },
+        upside_vs_immediate_sale_inr: altNet - immNet,
+        confidence_score: 72,
+        recommended: topPathway === 'alternate_market',
+        reasoning: 'Adjacent consumer district mandi offers premium rates offsetting additional freight cost.',
+        risks: ['Transit delay', 'Variable arrival inspection']
+      },
+      {
+        pathway: 'processing_and_biomass',
+        label: has_biomass ? 'Industry Contract + Biomass Sale' : 'Direct Food Processor Contract',
+        estimated_net_return_inr: procNet,
+        gross_revenue_inr: procGross,
+        total_costs_inr: procCosts,
+        cost_breakdown: {
+          storage_fee: 0,
+          freight_transport: 1800,
+          handling_and_grading: Math.round(qtl * currPrice * 0.015)
+        },
+        upside_vs_immediate_sale_inr: procNet - immNet,
+        confidence_score: 84,
+        recommended: topPathway === 'processing_and_biomass',
+        reasoning: has_biomass
+          ? 'Guaranteed procurement pricing plus circular valorization of crop residues.'
+          : 'Stable institutional off-taker contract with minimum guaranteed realization.',
+        risks: ['Strict moisture standard compliance']
+      }
+    ];
+
     res.json({
       success: true,
-      data: decision
+      data: {
+        harvest_id: harvest_id || 'HAR_CUSTOM',
+        crop_type: harvestCrop,
+        quantity_quintals: qtl,
+        quantity_kg: qty,
+        current_modal_price_inr: currPrice,
+        holding_days: holdingDays,
+        recommended_pathway: topPathway,
+        top_net_upside_inr: Math.max(0, storeNet - immNet),
+        confidence_score: 82,
+        recommendations,
+        options: decision?.options || [],
+        circular_biomass_opportunity: decision?.circular_biomass_opportunity
+      }
     });
   } catch (err) {
     next(err);

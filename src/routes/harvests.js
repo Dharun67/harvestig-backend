@@ -4,43 +4,77 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
 
-// List harvests
+// List harvests (My lots vs All 25,005 database lots)
 router.get('/', authenticate, async (req, res, next) => {
   try {
-    const { crop_type, status, limit = 50 } = req.query;
+    const { crop_type, crop, state, district, search, status, scope = 'my', page = 1, limit = 50 } = req.query;
     const filter = {};
 
-    // Filter by farmer or show user's harvests + demo items
-    if (req.user?.user_id) {
-      filter.$or = [
-        { farmer_user_id: req.user.user_id },
-        { farmer_user_id: 'USR000001' },
-        { data_source: 'live_farmer_entry' }
-      ];
-    }
-    if (crop_type) filter.crop_type = new RegExp(crop_type, 'i');
+    const targetCrop = crop || crop_type;
+    if (targetCrop) filter.crop_type = new RegExp(targetCrop.trim(), 'i');
+    if (state) filter.state = new RegExp(state.trim(), 'i');
+    if (district) filter.district = new RegExp(district.trim(), 'i');
     if (status) filter.status = status;
 
-    let items = await Harvest.find(filter)
-      .sort({ harvest_date: -1 })
-      .limit(parseInt(limit, 10));
-
-    // Fallback if none found for specific filter
-    if (items.length === 0) {
-      items = await Harvest.find().sort({ harvest_date: -1 }).limit(10);
+    if (search) {
+      filter.$or = [
+        { crop_type: new RegExp(search.trim(), 'i') },
+        { district: new RegExp(search.trim(), 'i') },
+        { state: new RegExp(search.trim(), 'i') },
+        { quality_grade: new RegExp(search.trim(), 'i') }
+      ];
     }
+
+    const userId = req.user?.user_id || req.user?._id;
+
+    // If scope is 'my', filter by user's identity & live entry demo items
+    if (scope === 'my' && userId) {
+      const userConditions = [
+        { farmer_user_id: userId },
+        { farmer_user_id: req.user?.user_id },
+        { farmer_user_id: req.user?._id },
+        { data_source: 'live_farmer_entry' },
+        { farmer_user_id: 'USR000001' },
+        { farmer_user_id: 'USR005001' }
+      ];
+      if (filter.$or) {
+        filter.$and = [{ $or: userConditions }, { $or: filter.$or }];
+        delete filter.$or;
+      } else {
+        filter.$or = userConditions;
+      }
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [total, items] = await Promise.all([
+      Harvest.countDocuments(filter),
+      Harvest.find(filter)
+        .sort({ harvest_date: -1 })
+        .skip(skip)
+        .limit(limitNum)
+    ]);
 
     res.json({
       success: true,
       count: items.length,
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
+      limit: limitNum,
+      scope,
       data: items.map(h => ({
         id: h._id,
         harvest_id: h.harvest_id,
         crop: h.crop_type,
+        crop_type: h.crop_type,
         crop_category: h.crop_category,
-        variety: h.quality_grade || 'Standard',
+        variety: h.variety || h.quality_grade || 'Standard',
         quantityKg: h.quantity_kg,
         quantityTonnes: Math.round((h.quantity_kg / 1000) * 10) / 10,
+        quantity_quintals: Math.round((h.quantity_kg / 100) * 10) / 10,
         qty: `${(h.quantity_kg / 1000).toFixed(1)} tonnes`,
         location: `${h.district}, ${h.state}`,
         district: h.district,
@@ -48,8 +82,11 @@ router.get('/', authenticate, async (req, res, next) => {
         date: new Date(h.harvest_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
         harvestDate: h.harvest_date,
         quality: h.quality_grade || 'Grade A',
+        qualityGrade: h.quality_grade || 'Grade A',
         moisture_pct: h.moisture_pct,
-        status: h.status || 'Decision ready',
+        moisturePercentage: h.moisture_pct,
+        status: h.status || 'Active',
+        data_source: h.data_source,
         tone: h.status === 'sold' ? 'gray' : (h.status === 'stored' ? 'blue' : 'green')
       }))
     });
@@ -96,8 +133,8 @@ router.post('/', authenticate, async (req, res, next) => {
       qty = parseFloat(quantity) * 100;
     }
     
-    const harvestCount = await Harvest.countDocuments();
-    const newId = `HAR${String(harvestCount + 1).padStart(7, '0')}`;
+    // Safe unique ID generation
+    const newId = `HAR${Date.now().toString().slice(-6)}${Math.floor(100 + Math.random() * 900)}`;
     
     // Parse location string if provided as "District, State"
     let st = state || req.user?.state || 'Haryana';
@@ -109,12 +146,13 @@ router.post('/', authenticate, async (req, res, next) => {
     }
 
     const moisture = moisture_pct ? parseFloat(moisture_pct) : (moisture_percentage ? parseFloat(moisture_percentage) : 13.5);
-    const grade = quality_grade || quality || variety || 'Grade A';
+    const grade = quality_grade || quality || 'Grade A';
+    const cropVariety = variety || 'Standard';
 
     const newHarvest = await Harvest.create({
       _id: newId,
       harvest_id: newId,
-      farmer_user_id: req.user?.user_id || req.user?.id || 'USR005001',
+      farmer_user_id: req.user?.user_id || req.user?._id || 'USR005001',
       crop_type: cropName.trim(),
       crop_category: 'cereal',
       quantity_kg: qty,
@@ -140,11 +178,19 @@ router.post('/', authenticate, async (req, res, next) => {
         id: newHarvest._id,
         harvest_id: newHarvest.harvest_id,
         crop: newHarvest.crop_type,
-        qty: `${(newHarvest.quantity_kg / 1000).toFixed(1)} tonnes`,
+        crop_type: newHarvest.crop_type,
+        variety: cropVariety,
+        quantityKg: newHarvest.quantity_kg,
         quantityTonnes: newHarvest.quantity_kg / 1000,
+        quantity_quintals: newHarvest.quantity_kg / 100,
+        qty: `${(newHarvest.quantity_kg / 1000).toFixed(1)} tonnes`,
         location: `${newHarvest.district}, ${newHarvest.state}`,
+        district: newHarvest.district,
+        state: newHarvest.state,
         date: new Date(newHarvest.harvest_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        harvestDate: newHarvest.harvest_date,
         quality: newHarvest.quality_grade,
+        qualityGrade: newHarvest.quality_grade,
         status: newHarvest.status
       }
     });

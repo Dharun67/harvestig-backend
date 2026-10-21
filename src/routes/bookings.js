@@ -67,25 +67,44 @@ router.get('/', authenticate, async (req, res, next) => {
 // Create new booking
 router.post('/', authenticate, async (req, res, next) => {
   try {
-    const { booking_type, harvest_id, warehouse_id, transport_id, buyer_id, quantity_kg, estimated_cost_inr } = req.body;
-    if (!booking_type || !quantity_kg) {
-      return res.status(400).json({ success: false, message: 'booking_type and quantity_kg are required.' });
-    }
+    const {
+      booking_type,
+      harvest_id,
+      warehouse_id,
+      transport_id,
+      buyer_id,
+      crop_type,
+      quantity_kg,
+      quantity_quintals,
+      estimated_cost_inr,
+      total_amount,
+      from_date,
+      to_date,
+      duration_days,
+      facility_name,
+      provider_name,
+      contact_phone,
+      pickup_location,
+      drop_location
+    } = req.body;
 
-    const count = await Booking.countDocuments();
-    const newId = `BKG${String(count + 1).padStart(7, '0')}`;
+    const qty = quantity_kg ? parseFloat(quantity_kg) : (quantity_quintals ? parseFloat(quantity_quintals) * 100 : 5000);
+    const cost = estimated_cost_inr ? parseFloat(estimated_cost_inr) : (total_amount ? parseFloat(total_amount) : 1500);
+
+    const newId = `BKG${Date.now().toString().slice(-6)}${Math.floor(100 + Math.random() * 900)}`;
 
     const newBooking = await Booking.create({
       _id: newId,
       booking_id: newId,
-      customer_user_id: req.user?.user_id || req.user?.id || 'USR005001',
-      booking_type,
+      customer_user_id: req.user?.user_id || req.user?._id || 'USR005001',
+      booking_type: booking_type || 'warehouse_storage',
+      crop_type: crop_type || 'Agricultural Cargo',
       harvest_id: harvest_id || '',
       warehouse_id: warehouse_id || '',
       transport_id: transport_id || '',
       buyer_id: buyer_id || '',
-      quantity_kg: parseFloat(quantity_kg),
-      estimated_cost_inr: parseFloat(estimated_cost_inr || 1500),
+      quantity_kg: qty,
+      estimated_cost_inr: cost,
       status: 'confirmed',
       created_date: new Date(),
       data_source: 'live_user_booking'
@@ -94,7 +113,22 @@ router.post('/', authenticate, async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: 'Booking confirmed successfully.',
-      data: newBooking
+      data: {
+        ...newBooking.toObject(),
+        booking_id: newId,
+        id: newId,
+        crop_type: crop_type || 'Agricultural Cargo',
+        from_date,
+        to_date,
+        duration_days,
+        facility_name,
+        provider_name,
+        contact_phone,
+        pickup_location,
+        drop_location,
+        estimated_cost_inr: cost,
+        total_price_inr: cost
+      }
     });
   } catch (err) {
     next(err);

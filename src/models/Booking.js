@@ -7,7 +7,7 @@ const bookingSchema = new Schema(
     customer_user_id: { type: String, required: true, index: true },
     booking_type: {
       type: String,
-      enum: ['storage', 'transport', 'crop_sale', 'biomass_purchase'],
+      enum: ['storage', 'transport', 'crop_sale', 'biomass_purchase', 'warehouse_storage', 'freight_transport'],
       required: true,
       index: true
     },

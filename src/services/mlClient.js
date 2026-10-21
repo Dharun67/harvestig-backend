@@ -30,12 +30,15 @@ export class MLClient {
     return await this.fetchApi('/health');
   }
 
-  async predictPrice(cropType, state, district, currentModalPrice, horizonDays = 30) {
+  async predictPrice(cropType, state, district, currentModalPrice, horizonDays = 30, minPrice = null, maxPrice = null, marketName = null) {
     const payload = {
       crop_type: cropType,
       state: state || 'Haryana',
       district: district || 'Karnal',
+      market_name: marketName,
       current_modal_price: currentModalPrice,
+      min_price: minPrice,
+      max_price: maxPrice,
       horizon_days: horizonDays
     };
     const res = await this.fetchApi('/predict/market-price', {
@@ -45,16 +48,31 @@ export class MLClient {
     if (res) return res;
 
     // Fallback baseline heuristic if service unreachable
-    const fallbackPred = currentModalPrice ? Math.round(currentModalPrice * 1.08) : 3200;
+    const currModal = currentModalPrice || 2840;
+    const currMin = minPrice || Math.round(currModal * 0.92);
+    const currMax = maxPrice || Math.round(currModal * 1.13);
+    const fallbackPred = Math.round(currModal * (1 + 0.08 * (horizonDays / 30)));
+    const predMin = Math.round(fallbackPred * 0.92);
+    const predMax = Math.round(fallbackPred * 1.13);
+    const gain = fallbackPred - currModal;
+    const changePct = Math.round(((fallbackPred - currModal) / currModal) * 1000) / 10;
+
     return {
       crop_type: cropType,
       state: state || 'Haryana',
       district: district || 'Karnal',
-      current_price_inr_per_quintal: currentModalPrice || 2840,
+      market_name: marketName || `${district || 'Karnal'} APMC Mandi`,
+      current_price_inr_per_quintal: currModal,
+      current_min_price_inr_per_quintal: currMin,
+      current_max_price_inr_per_quintal: currMax,
       predicted_modal_price_inr_per_quintal: fallbackPred,
-      price_change_pct: 8.0,
+      predicted_min_price_inr_per_quintal: predMin,
+      predicted_max_price_inr_per_quintal: predMax,
+      forecast_price_inr_per_quintal: fallbackPred,
+      expected_gain_inr_per_quintal: gain,
+      price_change_pct: changePct,
       forecast_horizon_days: horizonDays,
-      confidence_score: 0.70,
+      confidence_score: 0.78,
       model_version: 'fallback-baseline-v1',
       is_demo_synthetic: true,
       data_classification: 'HEURISTIC FALLBACK (ML SERVICE OFFLINE)'

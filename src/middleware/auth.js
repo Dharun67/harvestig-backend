@@ -16,12 +16,11 @@ export async function authenticate(req, res, next) {
     }
 
     // Optional demo user fallback if no token provided
-    // Allows instant testing of UI without forcing immediate login
-    const demoUser = await User.findOne({ user_id: 'USR000001' }) || {
-      _id: 'USR000001',
-      user_id: 'USR000001',
-      full_name: 'Ramesh Kumar',
-      email: 'ramesh.farmer@agriconnect.ai',
+    const demoUser = await User.findOne({ user_id: 'USR_DEMO_001' }) || {
+      _id: 'USR_DEMO_001',
+      user_id: 'USR_DEMO_001',
+      full_name: 'Farmer Partner',
+      email: 'demo.farmer@agriconnect.ai',
       role: 'farmer',
       state: 'Haryana',
       district: 'Karnal'
